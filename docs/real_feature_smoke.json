@@ -1,0 +1,8 @@
+{
+  "device": "cpu",
+  "patches_tested": 1024,
+  "feature_dim": 1024,
+  "loss_finite": true,
+  "sampled_patches": 307,
+  "scope": "One existing lung-cancer feature tensor, first at most 1024 patches; random teacher; plumbing test only. No performance claim."
+}

@@ -1,7 +1,14 @@
 __pycache__/
 *.py[cod]
+.venv/
+.env
 runs/
 data/
 *.pt
 *.pth
-.env
+*.h5
+*.hdf5
+*.svs
+*.ndpi
+*.log
+.DS_Store

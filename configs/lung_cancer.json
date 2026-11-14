@@ -1,0 +1,18 @@
+{
+  "manifest": "data/manifest.csv",
+  "output_dir": "runs/lung_cancer_attmil",
+  "device": "cuda",
+  "seed": 2021,
+  "folds": 3,
+  "val_ratio": 0.2,
+  "block_size": 512,
+  "mil_epochs": 100,
+  "student_epochs": 50,
+  "mil": {"name": "attmil", "input_dim": 1024, "dropout": 0.25},
+  "student": {"input_dim": 1024, "kind": "context_mlp", "hidden_dim": 128},
+  "student_loss": "pairwise",
+  "normalization": "log",
+  "pair_count": 4096,
+  "sample_ratio": 0.3,
+  "min_patches": 10
+}
