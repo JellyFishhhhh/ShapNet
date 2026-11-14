@@ -79,3 +79,23 @@ on those parameters and the data, real coverage may dominate all synthetic
 references; a benefit over the real-only control is not assumed or established.
 Cold MIL initialization defaults to a fixed random state on supplied pretrained
 patch features; optional external MIL weights require explicit provenance.
+
+## Follow-up: device-enabled execution and reproducibility
+
+The default command sandbox hid NVIDIA character devices; device-enabled execution
+confirmed working RTX 3090 GPUs, driver 555.42.06 and the existing CUDA 12.4 RRT
+runtime. CUDA availability in the sandbox must not be interpreted as a host-driver
+diagnosis. No driver or package installation was needed.
+
+The final suite passes **24 tests**. Added tests cover safe SHA256 reuse including
+rapid writes with coalesced timestamps, and repeatable dictionaries under a
+parallel outer runtime. K-means accumulation is now single-threaded. CUDA setup
+selects the configured device and supplies a default deterministic cuBLAS workspace
+before initialization; reset/peak memory accounting explicitly uses that device.
+
+A separate synthetic-only CUDA test ran 3 rounds and 111 updates on `cuda:1`,
+starting without an exported `CUBLAS_WORKSPACE_CONFIG`. A continuous run and a run
+paused at update 2 then resumed produced exactly equal model parameters, query
+audits and metrics. All round peaks on the selected device were positive. These
+checks establish execution and replay behavior, not convergence or clinical value.
+Private cohort artifacts and results are kept outside version control.

@@ -137,3 +137,17 @@ class MethodTests(unittest.TestCase):
             self.assertEqual(store.load('s').shape,(3,4))
             with h5py.File(path,'w') as f: f['features']=np.array([[np.nan]*4],np.float32)
             with self.assertRaisesRegex(ValueError,'Nonfinite'): store.load('s')
+
+    def test_dictionary_repeated_fit_matches_under_parallel_outer_runtime(self):
+        from threadpoolctl import threadpool_limits
+        with tempfile.TemporaryDirectory() as tmp:
+            generate(tmp)
+            slides,labels=read_cohort(Path(tmp)/'manifest.csv')
+            store=FeatureStore(slides,8)
+            train=make_splits(labels)['train']
+            queried={p:labels[p] for p in train[:8]}
+            with threadpool_limits(limits=4):
+                first=Morphology.fit(store,queried,train,k=3,seed=11)
+                second=Morphology.fit(store,queried,train,k=3,seed=11)
+            for key in ('mean','scale','centers'):
+                torch.testing.assert_close(getattr(first,key),getattr(second,key),rtol=0,atol=0)

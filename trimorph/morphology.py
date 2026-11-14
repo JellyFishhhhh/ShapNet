@@ -2,6 +2,7 @@
 import numpy as np
 import torch
 from sklearn.cluster import KMeans
+from threadpoolctl import threadpool_limits
 from torch.nn import functional as F
 
 
@@ -29,7 +30,9 @@ class Morphology:
         x = x[torch.randperm(len(x), generator=generator)[:max_fit]]
         mean, scale = x.mean(0), x.std(0, unbiased=False).clamp_min(1e-5)
         z = (x-mean) / scale
-        km = KMeans(n_clusters=min(k, len(z)), random_state=seed, n_init=5).fit(z.numpy())
+        # Parallel centroid accumulation can change rounding and downstream Adam paths.
+        with threadpool_limits(limits=1):
+            km = KMeans(n_clusters=min(k, len(z)), random_state=seed, n_init=5).fit(z.numpy())
         centers = torch.tensor(km.cluster_centers_, dtype=torch.float32)
         # Keep the model input width fixed even with tiny queried material banks.
         centers = centers[torch.arange(k) % len(centers)]

@@ -1,6 +1,7 @@
 """Atomic step-resumable active learning; test labels never enter construction."""
 from copy import deepcopy
 import json
+import os
 from pathlib import Path
 import time
 
@@ -44,11 +45,16 @@ def new_bank(c, store, oracle, model, morphology, r):
 def _run(config, resume=False, max_updates=None, max_rounds=None):
     """Bounds pause after a committed update/round; resume replays no committed update."""
     c = read_config(config) if isinstance(config, (str,Path)) else resolve(config)
+    if c['device'].startswith('cuda'):
+        os.environ.setdefault('CUBLAS_WORKSPACE_CONFIG', ':4096:8')
     torch.set_num_threads(c['threads'])
     seed_all(c['seed'])
     torch.use_deterministic_algorithms(True)
-    if c['device'].startswith('cuda') and not torch.cuda.is_available():
-        raise RuntimeError('CUDA requested but unavailable; choose device=cpu explicitly')
+    if c['device'].startswith('cuda'):
+        if not torch.cuda.is_available():
+            raise RuntimeError('CUDA requested but unavailable; choose device=cpu explicitly')
+        index = torch.device(c['device']).index
+        torch.cuda.set_device(0 if index is None else index)
     if max_updates is not None and max_updates < 1:
         raise ValueError('max_updates must be positive')
     output = Path(c['output_dir']).resolve()
@@ -120,7 +126,7 @@ def _run(config, resume=False, max_updates=None, max_rounds=None):
         round_dir.mkdir(exist_ok=True)
         tick = time.perf_counter()
         if c['device'].startswith('cuda'):
-            torch.cuda.reset_peak_memory_stats()
+            torch.cuda.reset_peak_memory_stats(c['device'])
         if state['stage'] == 'prepare':
             morphology = Morphology.fit(store, oracle.revealed, splits['train'], seed=c['seed']+r, **c['morphology'])
             state.update(morphology=morphology.state_dict(),
@@ -222,7 +228,7 @@ def _run(config, resume=False, max_updates=None, max_rounds=None):
             queried_patients=sorted(oracle.revealed), morphology_fit_patients=morphology.fit_patients,
             morphology_protocol=morphology.protocol, test=test, validation_history=state['training_history'],
             synthetic_bags=len(bank), training_synthetic_bags=len(train_bank),
-            seconds=state['round_seconds'], peak_cuda_bytes=int(torch.cuda.max_memory_allocated()) if c['device'].startswith('cuda') else 0,
+            seconds=state['round_seconds'], peak_cuda_bytes=int(torch.cuda.max_memory_allocated(c['device'])) if c['device'].startswith('cuda') else 0,
             updates=state['updates'], next_query=selected)
         save_checkpoint(round_dir/'model.pt', dict(model=state['best'], morphology=state['morphology']))
         save_checkpoint(round_dir/'coverage_bank.pt', [b.state_dict() for b in bank])
