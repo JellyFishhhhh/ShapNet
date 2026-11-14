@@ -1,0 +1,3 @@
+# In addition to the repository's PyTorch/NumPy/scikit-learn dependencies.
+h5py>=3.8,<4
+matplotlib>=3.7,<4

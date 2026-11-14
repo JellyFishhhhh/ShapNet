@@ -46,3 +46,20 @@ MIL models: AttMIL, RRTMIL, TransMIL, DSMIL, MeanMIL, MaxMIL. Selected upstream 
 ## Validation limits
 
 CPU synthetic tests cover numerical gradient equivalence, all six MIL forward/backward paths, deterministic sampling and a complete train→targets→student→test→reload run. Passing tests does not establish GPU memory limits, convergence, classification performance, or clinical validity. Real-data manifests and weights are intentionally excluded from Git.
+
+## Independent study 2: TriMorph-MIL
+
+Patient-level active learning from three-view ABMIL uncertainty and synthetic-aware
+facility coverage, with same-class cross-patient morphology-matched pseudo-bags.
+Uses pre-extracted PT/H5 features; requires explicit patient IDs. No teacher or
+student weights from study 1 are required. Existing `python -m shapnet` is unchanged.
+
+```bash
+python -m trimorph.demo --output runs/trimorph_demo
+python -m trimorph --config runs/trimorph_demo/demo.json --max-updates 2
+python -m trimorph --config runs/trimorph_demo/demo.json --resume
+```
+
+See [method, leakage contract, data preparation, controls and resume](docs/trimorph/METHOD.zh-CN.md).
+Real experiment templates: `configs/trimorph/lung.json`, `configs/trimorph/lung_bounded.json`.
+Additional H5/plot dependencies: `trimorph/requirements.txt`.
