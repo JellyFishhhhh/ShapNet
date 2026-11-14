@@ -22,7 +22,7 @@ def describe(model, morphology, store, patients):
                      probability=float(out['fused_logits'].softmax(-1)[1]),
                      view_probs=out['view_probs'].cpu().tolist(),
                      representation=out['representation'].cpu().tolist(),
-                     composition=morphology.composition(x).tolist())
+                     composition=out['composition'].cpu().tolist())
         slides[slide.slide_id] = entry
         by_patient.setdefault(slide.patient_id, []).append(entry)
     result = {}
@@ -40,7 +40,7 @@ def describe_synthetic(model, morphology, bank):
     for bag in bank:
         out = model(bag.features.to(device), morphology)
         result.append(dict(bag_id=bag.bag_id, representation=out['representation'].cpu().tolist(),
-                           composition=morphology.composition(bag.features).tolist()))
+                           composition=out['composition'].cpu().tolist()))
     return result
 
 

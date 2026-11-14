@@ -88,6 +88,7 @@ class TriMorphMIL(nn.Module):
         logits = self.classifier(reps)
         return dict(view_logits=logits, view_probs=logits.softmax(-1), representation=fused,
                     fused_logits=self.classifier(fused), attention=weights, gates=gates,
+                    composition=torch.bincount(clusters, minlength=len(morphology.centers)).float()/len(x),
                     indices=(torch.arange(len(x), device=x.device), discr, balanced))
 
 

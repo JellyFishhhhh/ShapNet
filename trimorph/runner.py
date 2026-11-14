@@ -11,6 +11,7 @@ from shapnet.io import digest, environment, load_checkpoint, object_digest, save
 from .config import read_config, resolve
 from .data import FeatureStore, Oracle, budget_schedule, make_splits, read_cohort, validate_splits
 from .evaluation import describe, describe_synthetic, evaluate, export_curves
+from .integrity import feature_digests
 from .model import TriMorphMIL, supervised_loss
 from .morphology import Morphology
 from .selection import acquire
@@ -59,7 +60,7 @@ def _run(config, resume=False, max_updates=None, max_rounds=None):
     # Integrity hashes are setup metadata, never model inputs or fitted statistics.
     identity = object_digest(dict(config=c, source={p.name:digest(p) for p in sorted(Path(__file__).parent.glob('*.py'))},
         manifest=digest(c['manifest']),
-        features={s.slide_id:digest(s.feature_path) for s in slides}, splits=splits,
+        features=feature_digests(slides, c['feature_hash_cache']), splits=splits,
         external=digest(c['training']['external_initialization']) if c['training']['external_initialization'] else None,
         provenance=digest(c['training']['external_provenance']) if c['training']['external_provenance'] else None))
     checkpoint = output/'state.pt'
@@ -179,6 +180,8 @@ def _run(config, resume=False, max_updates=None, max_rounds=None):
                 state['updates'] += 1
                 state['round_seconds'] += time.perf_counter()-tick
                 save_checkpoint(checkpoint, state)
+                if state['step'] % 25 == 0 or state['step'] == len(order):
+                    print(f"round={r} phase={phase} epoch={state['epoch']} step={state['step']}/{len(order)} loss={float(loss.detach()):.5f}", flush=True)
                 if max_updates is not None and state['updates']-update_start >= max_updates:
                     return dict(status='bounded', rounds=len(state['history']), updates=state['updates'])
             if phase=='train':

@@ -6,6 +6,7 @@ from pathlib import Path
 DEFAULT = dict(
     manifest='data/manifest.csv', output_dir='runs/trimorph', device='cpu', seed=0,
     split_seed=2026, val_fraction=.2, test_fraction=.2, splits_file=None,
+    feature_hash_cache=None,
     input_dim=1024, threads=1,
     budget=dict(initial=.15, step=.1, maximum=.5, ensure_initial_classes=True),
     morphology=dict(k=8, per_slide=512, max_fit=16384, protocol='queried_only'),

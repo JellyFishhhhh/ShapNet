@@ -76,12 +76,17 @@ def acquire(unlabeled, labeled, synthetic, count, strategy='coverage', alpha=1.,
         def kernel(other):
             return similarity(reps, comps, [v['representation'] for v in other],
                               [v['composition'] for v in other], representation_weight, sigma)
-        base = np.zeros(len(ids))
+        real_base = np.zeros(len(ids))
+        synthetic_base = np.zeros(len(ids))
         if labeled:
-            base = np.maximum(base, kernel(list(labeled.values())).max(1))
+            real_base = kernel(list(labeled.values())).max(1)
         if synthetic_coverage and synthetic:
-            base = np.maximum(base, eta*kernel(list(synthetic)).max(1))
-        record['base_coverage'] = base.tolist()
+            synthetic_base = eta*kernel(list(synthetic)).max(1)
+        base = np.maximum(real_base, synthetic_base)
+        record.update(base_coverage=base.tolist(), real_coverage=real_base.tolist(),
+                      discounted_synthetic_coverage=synthetic_base.tolist(),
+                      synthetic_dominates_count=int((synthetic_base>real_base).sum()),
+                      mean_synthetic_coverage_increment=float((base-real_base).mean()))
         chosen, gains = greedy_coverage(ids, similarity(reps, comps, representation_weight=representation_weight, sigma=sigma), q, base, count)
     record.update(selected=chosen, marginal_gains=gains)
     return chosen, record

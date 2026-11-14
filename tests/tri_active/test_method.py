@@ -51,6 +51,8 @@ class MethodTests(unittest.TestCase):
         _,on=acquire(u,labeled,synthetic,1,eta=.7,sigma=.1)
         np.testing.assert_allclose(off['base_coverage'],zero['base_coverage'])
         self.assertGreaterEqual(on['base_coverage'][0],.7)
+        self.assertGreater(on['synthetic_dominates_count'],0)
+        self.assertGreater(on['mean_synthetic_coverage_increment'],0)
         self.assertEqual(on['frozen_batch'],True)
         with self.assertRaises(ValueError): acquire(u,labeled,synthetic,1,eta=1)
         k=similarity([[1,2],[2,1]],[[1,0],[0,1]])
