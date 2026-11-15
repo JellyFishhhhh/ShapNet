@@ -11,7 +11,7 @@ import torch
 from shapnet.io import digest, environment, load_checkpoint, object_digest, save_checkpoint, seed_all, write_json
 from .config import read_config, resolve
 from .data import FeatureStore, Oracle, budget_schedule, make_splits, read_cohort, validate_splits
-from .evaluation import describe, describe_synthetic, evaluate, export_curves
+from .evaluation import describe, describe_synthetic, evaluate, export_curves, validation_threshold, prediction_metrics
 from .integrity import feature_digests
 from .model import TriMorphMIL, supervised_loss
 from .morphology import Morphology
@@ -61,7 +61,7 @@ def _run(config, resume=False, max_updates=None, max_rounds=None):
     slides, setup_labels = read_cohort(c['manifest'])
     splits = (validate_splits(json.loads(Path(c['splits_file']).read_text()), setup_labels)
               if c['splits_file'] else make_splits(setup_labels, c['split_seed'], c['val_fraction'], c['test_fraction']))
-    store = FeatureStore(slides, c['input_dim'])
+    store = FeatureStore(slides, c['input_dim'], c['feature_memory_map'])
     schedule = budget_schedule(len(splits['train']), **{k:v for k,v in c['budget'].items() if k!='ensure_initial_classes'})
     # Integrity hashes are setup metadata, never model inputs or fitted statistics.
     identity = object_digest(dict(config=c, source={p.name:digest(p) for p in sorted(Path(__file__).parent.glob('*.py'))},
@@ -132,7 +132,8 @@ def _run(config, resume=False, max_updates=None, max_rounds=None):
             state.update(morphology=morphology.state_dict(),
                 model=deepcopy(state['last_best'] if c['training']['warm_start'] and state['last_best'] is not None else state['initial']),
                 optimizer=None, epoch=0, step=0, stage='warmup', bank_file=None, bank_sha256=None, best=None,
-                best_score=-1., training_history=[], round_seconds=state['round_seconds']+time.perf_counter()-tick)
+                best_score=-1., best_epoch=None, best_validation_predictions=None, stale_epochs=0, stopped_early=False,
+                epoch_loss_sum=0., epoch_items=0, training_history=[], round_seconds=state['round_seconds']+time.perf_counter()-tick)
             save_checkpoint(checkpoint, state)
         morphology = Morphology.from_state(state['morphology'])
         model = build_model(c).to(c['device']); model.load_state_dict(state['model'])
@@ -184,6 +185,8 @@ def _run(config, resume=False, max_updates=None, max_rounds=None):
                 loss.backward(); optimizer.step()
                 state.update(model=cpu_tree(model.state_dict()), optimizer=cpu_tree(optimizer.state_dict()), step=step+1)
                 state['updates'] += 1
+                state['epoch_loss_sum'] += float(loss.detach())
+                state['epoch_items'] += 1
                 state['round_seconds'] += time.perf_counter()-tick
                 save_checkpoint(checkpoint, state)
                 if state['step'] % 25 == 0 or state['step'] == len(order):
@@ -192,13 +195,25 @@ def _run(config, resume=False, max_updates=None, max_rounds=None):
                     return dict(status='bounded', rounds=len(state['history']), updates=state['updates'])
             if phase=='train':
                 tick = time.perf_counter()
-                val, _ = evaluate(model, morphology, store, splits['val'], oracle.evaluation_labels('val'))
+                val, val_predictions = evaluate(model, morphology, store, splits['val'], oracle.evaluation_labels('val'))
                 score = val['slide']['auc']
-                state['training_history'].append(dict(epoch=state['epoch'], validation=val))
-                if score > state['best_score']:
+                state['training_history'].append(dict(epoch=state['epoch'], validation=val,
+                    mean_training_loss=state['epoch_loss_sum']/max(1,state['epoch_items']),
+                    optimizer_updates=state['epoch_items']))
+                if score > state['best_score']+c['training']['min_delta']:
                     state['best'], state['best_score'] = cpu_tree(model.state_dict()), score
+                    state['best_validation_predictions'] = val_predictions
+                    state['best_epoch'] = state['epoch']
+                    state['stale_epochs'] = 0
+                else:
+                    state['stale_epochs'] += 1
+                if c['training']['patience'] and state['stale_epochs'] >= c['training']['patience']:
+                    state['stopped_early'] = True
+                print(f"round={r} epoch={state['epoch']} val_auc={score:.5f} best={state['best_score']:.5f} stale={state['stale_epochs']}",flush=True)
                 state['round_seconds'] += time.perf_counter()-tick
-            state.update(epoch=state['epoch']+1, step=0)
+            state.update(epoch=state['epoch']+1, step=0, epoch_loss_sum=0., epoch_items=0)
+            if state['stopped_early']:
+                state['stage'] = 'finalize'
             save_checkpoint(checkpoint, state)
         # Everything below is deterministically reconstructible if interrupted before commit.
         tick = time.perf_counter()
@@ -221,11 +236,19 @@ def _run(config, resume=False, max_updates=None, max_rounds=None):
         else:
             selected=[]; acquisition=dict(selected=[], reason='budget_exhausted')
         # Test evaluation is strictly downstream of all fit and acquisition decisions.
-        test, predictions = evaluate(model, morphology, store, splits['test'], oracle.evaluation_labels('test'))
+        threshold=.5
+        val_labels=oracle.evaluation_labels('val')
+        if c['training']['threshold_mode']=='validation_macro_f1':
+            val_slides=state['best_validation_predictions']['slides']
+            threshold=validation_threshold([val_labels[v['patient_id']] for v in val_slides.values()],
+                                           [v['probability'] for v in val_slides.values()])
+        test, predictions = evaluate(model, morphology, store, splits['test'], oracle.evaluation_labels('test'),threshold)
+        fixed_test=prediction_metrics(predictions,oracle.evaluation_labels('test'),.5)
         state['round_seconds'] += time.perf_counter()-tick
         record = dict(round=r, queried=len(oracle.revealed), validation_patients=len(splits['val']),
             total_labeled_patients=len(oracle.revealed)+len(splits['val']),
-            queried_patients=sorted(oracle.revealed), morphology_fit_patients=morphology.fit_patients,
+            queried_patients=sorted(oracle.revealed), best_epoch=state['best_epoch'], stopped_early=state['stopped_early'],
+            threshold_mode=c['training']['threshold_mode'], selected_threshold=threshold, test_fixed_threshold=fixed_test, morphology_fit_patients=morphology.fit_patients,
             morphology_protocol=morphology.protocol, test=test, validation_history=state['training_history'],
             synthetic_bags=len(bank), training_synthetic_bags=len(train_bank),
             seconds=state['round_seconds'], peak_cuda_bytes=int(torch.cuda.max_memory_allocated(c['device'])) if c['device'].startswith('cuda') else 0,
@@ -237,6 +260,8 @@ def _run(config, resume=False, max_updates=None, max_rounds=None):
         write_json(round_dir/'acquisition.json', acquisition)
         write_json(round_dir/'test_predictions.json', predictions)
         write_json(round_dir/'metrics.json', record)
+        write_json(round_dir/'best_validation_predictions.json', state['best_validation_predictions'])
+        write_json(round_dir/'validation_history.json', state['training_history'])
         state['history'].append(record)
         state['last_best'] = deepcopy(state['best'])
         if selected:

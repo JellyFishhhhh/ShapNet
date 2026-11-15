@@ -6,7 +6,7 @@ from pathlib import Path
 DEFAULT = dict(
     manifest='data/manifest.csv', output_dir='runs/trimorph', device='cpu', seed=0,
     split_seed=2026, val_fraction=.2, test_fraction=.2, splits_file=None,
-    feature_hash_cache=None,
+    feature_hash_cache=None, feature_memory_map=False,
     input_dim=1024, threads=1,
     budget=dict(initial=.15, step=.1, maximum=.5, ensure_initial_classes=True),
     morphology=dict(k=8, per_slide=512, max_fit=16384, protocol='queried_only'),
@@ -15,7 +15,8 @@ DEFAULT = dict(
                discriminative_ratio=.25, diverse_patches=32, balanced_patches=256),
     training=dict(warmup_epochs=1, epochs=20, lr=.0002, weight_decay=.00001,
                   fused_weight=1., synthetic_weight=.5, warm_start=False,
-                  external_initialization=None, external_provenance=None),
+                  external_initialization=None, external_provenance=None,
+                  patience=0, min_delta=0., threshold_mode='fixed'),
     synthesis=dict(enabled=True, per_patient=1, max_patches=1024, retain_ratio=.25,
                    replacement_ratio=.5, mode='matched'),
     acquisition=dict(strategy='coverage', alpha=1., eta=.25, synthetic_coverage=True,
@@ -39,6 +40,10 @@ def resolve(config):
         raise ValueError('Positive epochs/dimensions/threads required')
     if t['lr'] <= 0 or min(t['weight_decay'],t['fused_weight'],t['synthetic_weight']) < 0:
         raise ValueError('Invalid training weights')
+    if not isinstance(t['patience'], int) or t['patience'] < 0 or t['min_delta'] < 0:
+        raise ValueError('Invalid early stopping settings')
+    if t['threshold_mode'] not in ('fixed', 'validation_macro_f1'):
+        raise ValueError('Threshold mode must be fixed or validation_macro_f1')
     if t['external_initialization'] and not t['external_provenance']:
         raise ValueError('External weights require a provenance JSON declaration')
     if not 0 <= a['eta'] < 1 or a['alpha'] < 0 or a['sigma'] <= 0 or not 0 <= a['representation_weight'] <= 1:

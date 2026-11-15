@@ -1,0 +1,67 @@
+{
+  "manifest": "data/lung_patient_manifest_pt.csv",
+  "output_dir": "runs/private_full_supervised_seed0",
+  "device": "cuda:1",
+  "seed": 0,
+  "split_seed": 2026,
+  "val_fraction": 0.2,
+  "test_fraction": 0.2,
+  "splits_file": "data/lung_patient_splits.json",
+  "feature_hash_cache": "data/lung_pt_feature_hashes.json",
+  "feature_memory_map": true,
+  "input_dim": 1024,
+  "threads": 4,
+  "budget": {
+    "initial": 1.0,
+    "step": 1.0,
+    "maximum": 1.0,
+    "ensure_initial_classes": true
+  },
+  "morphology": {
+    "k": 8,
+    "per_slide": 512,
+    "max_fit": 16384,
+    "protocol": "queried_only"
+  },
+  "model": {
+    "hidden_dim": 128,
+    "attention_dim": 64,
+    "use_morphology": true,
+    "use_view_ids": true,
+    "use_fusion": true,
+    "three_views": true,
+    "discriminative_ratio": 0.25,
+    "diverse_patches": 32,
+    "balanced_patches": 256
+  },
+  "training": {
+    "warmup_epochs": 1,
+    "epochs": 20,
+    "lr": 0.0002,
+    "weight_decay": 1e-05,
+    "fused_weight": 1.0,
+    "synthetic_weight": 0.5,
+    "warm_start": false,
+    "external_initialization": null,
+    "external_provenance": null,
+    "patience": 5,
+    "min_delta": 0.0,
+    "threshold_mode": "validation_macro_f1"
+  },
+  "synthesis": {
+    "enabled": true,
+    "per_patient": 1,
+    "max_patches": 1024,
+    "retain_ratio": 0.25,
+    "replacement_ratio": 0.5,
+    "mode": "matched"
+  },
+  "acquisition": {
+    "strategy": "coverage",
+    "alpha": 1.0,
+    "eta": 0.25,
+    "synthetic_coverage": true,
+    "representation_weight": 0.5,
+    "sigma": 0.5
+  }
+}

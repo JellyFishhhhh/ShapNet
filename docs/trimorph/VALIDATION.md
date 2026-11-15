@@ -99,3 +99,18 @@ paused at update 2 then resumed produced exactly equal model parameters, query
 audits and metrics. All round peaks on the selected device were positive. These
 checks establish execution and replay behavior, not convergence or clinical value.
 Private cohort artifacts and results are kept outside version control.
+
+## Full-label protocol checks
+
+27 tests pass after adding optional PT memory mapping, validation-AUC early
+stopping and validation-only classification threshold selection. Tests verify
+mapped tensors retain all values, AUC is invariant to decision threshold, and
+stopping counters plus epoch-loss accumulation survive optimizer-step resume.
+Flipping held-out test labels leaves the trained model, chosen epoch and
+validation-derived threshold unchanged.
+
+A synthetic-only `cuda:1` check revealed all 24 training labels, paused at update
+2 and resumed through validation early stopping. The selected threshold came
+from validation; fixed-0.5 and selected-threshold AUCs matched, dictionary fitting
+used training patients only, and the configured-device peak memory was positive.
+No private test feature was used for this runtime check.

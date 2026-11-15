@@ -102,9 +102,10 @@ def validate_splits(splits, labels):
 
 class FeatureStore:
     """No labels, no unbounded feature cache. H5 is read only, PT uses weights_only."""
-    def __init__(self, slides, input_dim):
+    def __init__(self, slides, input_dim, memory_map=False):
         self.slides = {s.slide_id: s for s in slides}
         self.input_dim = input_dim
+        self.memory_map = memory_map
         self.access_log = []
 
     def load(self, slide_id):
@@ -115,7 +116,7 @@ class FeatureStore:
             with h5py.File(s.feature_path, 'r') as f:
                 x = torch.from_numpy(f['features'][:])
         else:
-            x = torch.load(s.feature_path, map_location='cpu', weights_only=True)
+            x = torch.load(s.feature_path, map_location='cpu', weights_only=True, mmap=self.memory_map)
         if not isinstance(x, torch.Tensor) or x.ndim != 2 or x.shape[0] == 0 or x.shape[1] != self.input_dim:
             raise ValueError(f'Expected nonempty [N,{self.input_dim}] features: {slide_id}')
         x = x.float()

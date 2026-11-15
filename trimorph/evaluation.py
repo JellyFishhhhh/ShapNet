@@ -44,21 +44,38 @@ def describe_synthetic(model, morphology, bank):
     return result
 
 
-def metrics(labels, probabilities):
+def metrics(labels, probabilities, threshold=.5):
     y, p = np.asarray(labels), np.asarray(probabilities)
-    if not np.isfinite(p).all():
+    if not np.isfinite(p).all() or not np.isfinite(threshold):
         raise ValueError('Nonfinite predictions')
     return dict(auc=float(roc_auc_score(y, p)) if len(set(y))==2 else None,
-                macro_f1=float(f1_score(y, p>=.5, labels=[0,1], average='macro', zero_division=0)),
-                accuracy=float(accuracy_score(y, p>=.5)), threshold=.5, n=len(y))
+                macro_f1=float(f1_score(y, p>=threshold, labels=[0,1], average='macro', zero_division=0)),
+                accuracy=float(accuracy_score(y, p>=threshold)), threshold=float(threshold), n=len(y))
 
 
-def evaluate(model, morphology, store, patients, labels):
+def evaluate(model, morphology, store, patients, labels, threshold=.5):
     # Labels are accessed only after predictions have been constructed.
     patient, slide = describe(model, morphology, store, patients)
-    return dict(patient=metrics([labels[p] for p in patient], [e['probability'] for e in patient.values()]),
+    return dict(patient=metrics([labels[p] for p in patient], [e['probability'] for e in patient.values()],threshold),
                 slide=metrics([labels[e['patient_id']] for e in slide.values()],
-                              [e['probability'] for e in slide.values()])), dict(patients=patient, slides=slide)
+                              [e['probability'] for e in slide.values()],threshold)), dict(patients=patient, slides=slide)
+
+
+def validation_threshold(labels, probabilities):
+    """Maximize validation slide Macro-F1; nearest 0.5 wins ties, then lower cut."""
+    y,p=np.asarray(labels),np.asarray(probabilities,dtype=float)
+    if len(y)!=len(p) or set(y)!={0,1} or not np.isfinite(p).all() or ((p<0)|(p>1)).any():
+        raise ValueError('Threshold fitting needs finite probabilities and both validation classes')
+    candidates=sorted(set([0.,.5,float(np.nextafter(p.max(),np.inf))]+p.tolist()))
+    scored=[(float(f1_score(y,p>=t,labels=[0,1],average='macro',zero_division=0)),t) for t in candidates]
+    best=max(v for v,t in scored)
+    return min((t for v,t in scored if abs(v-best)<1e-12),key=lambda t:(abs(t-.5),t))
+
+
+def prediction_metrics(predictions, labels, threshold=.5):
+    patient,slide=predictions['patients'],predictions['slides']
+    return dict(patient=metrics([labels[p] for p in patient],[e['probability'] for e in patient.values()],threshold),
+                slide=metrics([labels[e['patient_id']] for e in slide.values()],[e['probability'] for e in slide.values()],threshold))
 
 
 def curve_integral(y, x, axis=-1):
@@ -69,13 +86,15 @@ def curve_integral(y, x, axis=-1):
 def export_curves(output, rounds, train_count, val_count):
     output = Path(output)
     columns = ['round', 'train_query_patients', 'validation_patients', 'total_labeled_patients',
-               'train_fraction', 'slide_auc', 'slide_macro_f1', 'patient_auc', 'patient_macro_f1',
+               'train_fraction', 'classification_threshold', 'threshold_mode', 'best_epoch', 'epochs_trained', 'stopped_early', 'slide_auc', 'slide_macro_f1', 'patient_auc', 'patient_macro_f1',
                'synthetic_bags', 'round_seconds', 'peak_cuda_bytes']
     stream = io.StringIO()
     writer = csv.DictWriter(stream, fieldnames=columns); writer.writeheader()
     for r in rounds:
         writer.writerow(dict(round=r['round'], train_query_patients=r['queried'], validation_patients=val_count,
             total_labeled_patients=r['queried']+val_count, train_fraction=r['queried']/train_count,
+            classification_threshold=r.get('selected_threshold',.5),threshold_mode=r.get('threshold_mode','fixed'),
+            best_epoch=r.get('best_epoch'),epochs_trained=len(r.get('validation_history',[])),stopped_early=r.get('stopped_early',False),
             slide_auc=r['test']['slide']['auc'], slide_macro_f1=r['test']['slide']['macro_f1'],
             patient_auc=r['test']['patient']['auc'], patient_macro_f1=r['test']['patient']['macro_f1'],
             synthetic_bags=r['synthetic_bags'], round_seconds=r['seconds'], peak_cuda_bytes=r['peak_cuda_bytes']))
