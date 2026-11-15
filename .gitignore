@@ -12,3 +12,5 @@ data/
 *.ndpi
 *.log
 .DS_Store
+
+work/

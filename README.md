@@ -46,3 +46,7 @@ MIL models: AttMIL, RRTMIL, TransMIL, DSMIL, MeanMIL, MaxMIL. Selected upstream 
 ## Validation limits
 
 CPU synthetic tests cover numerical gradient equivalence, all six MIL forward/backward paths, deterministic sampling and a complete train→targets→student→test→reload run. Passing tests does not establish GPU memory limits, convergence, classification performance, or clinical validity. Real-data manifests and weights are intentionally excluded from Git.
+
+## Aligned hyperparameter run
+
+`configs/lung_cancer_rrtmil_aligned.json` selects Fold 0 with RRTMIL region_num=16, Adam lr=2e-4 / weight_decay=1e-5 / cosine; student architecture and pairwise objective are unchanged. Student AdamW uses lr=1e-3 / weight_decay=1e-4 / cosine to 1e-5, noise augmentation, clip=5 and patience=10. Validation fraction is 0.1. The student remains context_mlp (128), with 4096 sampled global pairs, not the historical Transformer. Patient isolation and validation-only thresholds remain in force. A local full PT/H5 validation is required before this run.

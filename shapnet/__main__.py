@@ -5,6 +5,7 @@ import torch
 from .data import read_manifest, make_folds, select_rows, load_features, validate_fold, manifest_identity
 from .io import seed_all, write_json, save_checkpoint, load_checkpoint, digest, environment
 from .models import build_mil, build_student
+from .optim import make_optimizer, make_scheduler
 from .objectives import normalize_targets, sample_pairs
 from .streaming import score_bag, backward_bag, select_indices
 from .metrics import ranking_metrics, macro_ranking, choose_threshold, binary_metrics
@@ -58,7 +59,8 @@ def run(config, stages):
             return result
         if 'teacher' in stages:
             if tp.exists(): raise FileExistsError('Teacher already exists; omit teacher stage or choose new output_dir')
-            opt=torch.optim.AdamW(teacher.parameters(),lr=c.get('mil_lr',2e-4))
+            opt=make_optimizer(teacher.parameters(),c.get('mil_optimizer','adamw'),c.get('mil_lr',2e-4),c.get('mil_weight_decay',.01))
+            scheduler=make_scheduler(opt,c.get('mil_scheduler','constant'),c.get('mil_epochs',100))
             best=-1.; history=[]
             for epoch in range(c.get('mil_epochs',100)):
                 teacher.train(); losses=[]
@@ -69,10 +71,12 @@ def run(config, stages):
                     loss.backward(); opt.step(); losses.append(float(loss.detach()))
                 probs=probabilities(val)
                 metrics=binary_metrics([r['label'] for r in val],probs,.5)
-                history.append(dict(epoch=epoch,loss=sum(losses)/len(losses),validation=metrics))
+                history.append(dict(epoch=epoch,loss=sum(losses)/len(losses),lr=opt.param_groups[0]['lr'],validation=metrics))
+                write_json(out/'teacher_history.json',history)
                 if metrics['auc']>best:
                     best=metrics['auc']; save_checkpoint(tp,{'model':teacher.state_dict(),'epoch':epoch})
                 print(f'fold={k} teacher epoch={epoch} val_auc={metrics["auc"]:.4f}',flush=True)
+                if scheduler is not None: scheduler.step()
             write_json(out/'teacher_history.json',history)
         teacher.load_state_dict(load_checkpoint(tp)['model']); teacher.eval()
         if 'targets' in stages:
@@ -96,24 +100,32 @@ def run(config, stages):
                 item=cache['targets'][row['slide_id']]
                 if item['feature_sha256']!=digest(row['feature_path']): raise ValueError('Feature changed after target generation')
                 target[row['slide_id']]=normalize_targets(item['values'],c.get('normalization','log'))
-            opt=torch.optim.AdamW(student.parameters(),lr=c.get('student_lr',1e-3))
+            opt=make_optimizer(student.parameters(),c.get('student_optimizer','adamw'),c.get('student_lr',1e-3),c.get('student_weight_decay',.01))
+            scheduler=make_scheduler(opt,c.get('student_scheduler','constant'),c.get('student_epochs',50),c.get('student_min_lr_ratio',.01))
+            stale_epochs=0
             best=-float('inf'); history=[]
             for epoch in range(c.get('student_epochs',50)):
                 student.train()
                 for j in torch.randperm(len(train)).tolist():
                     row=train[j]; x=features(row); opt.zero_grad(set_to_none=True)
+                    if c.get('student_augment',False) and torch.rand(1).item()>.5:
+                        x=x+torch.randn_like(x)*.01
                     pairs=sample_pairs(len(x),c.get('pair_count',4096),c.get('seed',2021)+epoch*len(train)+j)
                     backward_bag(student,x,target[row['slide_id']],c['block_size'],device,c.get('student_loss','mse'),pairs)
-                    torch.nn.utils.clip_grad_norm_(student.parameters(),1.,error_if_nonfinite=True); opt.step()
+                    torch.nn.utils.clip_grad_norm_(student.parameters(),c.get('student_clip_norm',1.),error_if_nonfinite=True); opt.step()
                 student.eval(); ranks=[]
                 for row in val:
                     scores=score_bag(student,features(row),c['block_size'],device)
                     ranks.append(ranking_metrics(scores,target[row['slide_id']],c.get('sample_ratio',.3)))
-                metrics=macro_ranking(ranks); history.append(dict(epoch=epoch,validation=metrics))
+                metrics=macro_ranking(ranks); history.append(dict(epoch=epoch,lr=opt.param_groups[0]['lr'],validation=metrics))
+                write_json(out/'student_history.json',history)
                 criterion=metrics['spearman'] if metrics['spearman'] is not None else -metrics['mae']
                 if criterion>best:
-                    best=criterion; save_checkpoint(sp,{'model':student.state_dict(),'epoch':epoch})
+                    best=criterion; stale_epochs=0; save_checkpoint(sp,{'model':student.state_dict(),'epoch':epoch})
+                else: stale_epochs+=1
                 print(f'fold={k} student epoch={epoch} val_spearman={metrics["spearman"]}',flush=True)
+                if scheduler is not None: scheduler.step()
+                if c.get('student_patience') and stale_epochs>=c['student_patience']: break
             write_json(out/'student_history.json',history)
         if 'evaluate' in stages:
             student.load_state_dict(load_checkpoint(sp)['model']); student.eval()

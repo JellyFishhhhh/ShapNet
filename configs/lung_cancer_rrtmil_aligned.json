@@ -1,0 +1,48 @@
+{
+  "manifest": "data/lung_cancer_validated_manifest.csv",
+  "output_dir": "runs/lung_cancer_rrtmil_aligned",
+  "device": "cuda:0",
+  "seed": 2021,
+  "folds": 3,
+  "val_ratio": 0.1,
+  "block_size": 512,
+  "mil_epochs": 100,
+  "student_epochs": 50,
+  "mil_lr": 0.0002,
+  "student_lr": 0.001,
+  "mil": {
+    "name": "rrtmil",
+    "input_dim": 1024,
+    "dropout": 0.25,
+    "params": {
+      "region_num": 16,
+      "n_layers": 2,
+      "epeg_k": 15,
+      "crmsa_k": 3
+    }
+  },
+  "student": {
+    "input_dim": 1024,
+    "kind": "context_mlp",
+    "hidden_dim": 128
+  },
+  "student_loss": "pairwise",
+  "normalization": "log",
+  "pair_count": 4096,
+  "sample_ratio": 0.3,
+  "min_patches": 10,
+  "cpu_threads": 2,
+  "run_folds": [
+    0
+  ],
+  "mil_optimizer": "adam",
+  "mil_weight_decay": 1e-05,
+  "mil_scheduler": "cosine",
+  "student_optimizer": "adamw",
+  "student_weight_decay": 0.0001,
+  "student_scheduler": "cosine",
+  "student_min_lr_ratio": 0.01,
+  "student_augment": true,
+  "student_clip_norm": 5.0,
+  "student_patience": 10
+}
