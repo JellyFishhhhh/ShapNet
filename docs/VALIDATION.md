@@ -9,3 +9,5 @@ Command: `OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 python -m unittest discover -
 See `real_feature_smoke.json` for a bounded CPU test against one existing lung-cancer feature tensor. No patient IDs, real features, manifests, trained weights or private paths are published.
 
 CUDA was unavailable. No full lung-cancer training, GPU memory benchmark, convergence test or predictive-performance validation has been performed. Teacher stages still use full bags. This repository establishes tested CPU execution and explicit scientific contracts, not a guarantee that arbitrary full datasets fit GPU memory.
+
+2026-11-15 integrity/restart fix: 11 tests passed in 23.283 seconds. Simulated interruption after teacher epoch 0, restored model/optimizer/scheduler/torch RNG and finished epoch 1; final weights matched uninterrupted training bit-for-bit on CPU. A transient incorrect byte read recovers only after a valid checksum; persistent mismatch/NaN fails. GPU exact-restart parity has not yet been tested.

@@ -1,5 +1,8 @@
 """Explicit patient identities and persisted patient-disjoint folds."""
 import csv
+import io
+import hashlib
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -37,21 +40,37 @@ def read_manifest(path):
             raise FileNotFoundError(feature)
         seen.add(slide)
         patient_labels[patient] = label
-        out.append(dict(slide_id=slide, patient_id=patient, label=label,
-                        feature_path=str(feature.resolve())))
+        record=dict(slide_id=slide, patient_id=patient, label=label, feature_path=str(feature.resolve()))
+        if row.get('feature_sha256'): record['feature_sha256']=row['feature_sha256']
+        out.append(record)
     return sorted(out, key=lambda r: r["slide_id"])
 
 
 def load_features(row, input_dim=None):
-    x = torch.load(row["feature_path"], map_location="cpu", weights_only=True)
-    if not isinstance(x, torch.Tensor) or x.ndim != 2 or x.shape[0] == 0:
-        raise ValueError(f"Expected nonempty [N,D] feature tensor: {row['slide_id']}")
-    if input_dim is not None and x.shape[1] != input_dim:
-        raise ValueError(f"Feature dimension mismatch: {row['slide_id']}")
-    x = x.float()
-    if not torch.isfinite(x).all():
-        raise ValueError(f"Nonfinite features: {row['slide_id']}")
-    return x
+    # Verify and deserialize the SAME bytes, avoiding a check/read race.
+    errors=[]
+    for attempt in range(3):
+        try:
+            payload=Path(row["feature_path"]).read_bytes()
+            expected=row.get("feature_sha256")
+            if expected and hashlib.sha256(payload).hexdigest()!=expected:
+                raise ValueError("Feature checksum differs from validated manifest")
+            x=torch.load(io.BytesIO(payload),map_location="cpu",weights_only=True)
+            if not isinstance(x,torch.Tensor) or x.ndim!=2 or x.shape[0]==0:
+                raise ValueError("Expected nonempty [N,D] tensor")
+            if input_dim is not None and x.shape[1]!=input_dim:
+                raise ValueError("Feature dimension mismatch")
+            x=x.float()
+            # NumPy provides an independent CPU finite check; disagreement is fatal
+            # for this attempt rather than allowing uncertain data into the model.
+            if not bool(torch.isfinite(x).all()) or not np.isfinite(x.numpy()).all():
+                raise ValueError("Nonfinite feature values")
+            if errors:
+                warnings.warn(f"Feature read recovered after {attempt} retries: {row['slide_id']}; {errors}")
+            return x
+        except (ValueError,RuntimeError,OSError,EOFError) as exc:
+            errors.append(str(exc))
+    raise ValueError(f"Feature integrity failed after 3 reads: {row['slide_id']}; {errors}")
 
 
 def manifest_identity(rows):

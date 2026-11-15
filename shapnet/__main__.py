@@ -11,7 +11,7 @@ from .streaming import score_bag, backward_bag, select_indices
 from .metrics import ranking_metrics, macro_ranking, choose_threshold, binary_metrics
 
 
-def run(config, stages):
+def run(config, stages, resume=False):
     c = json.loads(Path(config).read_text())
     if c.get('student_loss', 'mse') not in ('mse', 'huber', 'pairwise', 'margin_pairwise_logistic'):
         raise ValueError('Unsupported CLI student loss')
@@ -58,11 +58,19 @@ def run(config, stages):
                     result.append(float(teacher(x.unsqueeze(0).to(device)).softmax(-1)[0,1]))
             return result
         if 'teacher' in stages:
-            if tp.exists(): raise FileExistsError('Teacher already exists; omit teacher stage or choose new output_dir')
+            if tp.exists() and not resume: raise FileExistsError('Teacher already exists; omit teacher stage or choose new output_dir')
             opt=make_optimizer(teacher.parameters(),c.get('mil_optimizer','adamw'),c.get('mil_lr',2e-4),c.get('mil_weight_decay',.01))
             scheduler=make_scheduler(opt,c.get('mil_scheduler','constant'),c.get('mil_epochs',100))
-            best=-1.; history=[]
-            for epoch in range(c.get('mil_epochs',100)):
+            best=-1.; history=[]; start_epoch=0
+            last_path=out/'teacher_last.pt'
+            if resume:
+                state=load_checkpoint(last_path)
+                teacher.load_state_dict(state['model']); opt.load_state_dict(state['optimizer'])
+                if scheduler is not None: scheduler.load_state_dict(state['scheduler'])
+                best=state['best']; start_epoch=state['epoch']+1; history=state['history']
+                torch.set_rng_state(state['cpu_rng'])
+                if device.type=='cuda': torch.cuda.set_rng_state_all(state['cuda_rng'])
+            for epoch in range(start_epoch,c.get('mil_epochs',100)):
                 teacher.train(); losses=[]
                 for j in torch.randperm(len(train)).tolist():
                     row=train[j]; opt.zero_grad(set_to_none=True)
@@ -77,6 +85,7 @@ def run(config, stages):
                     best=metrics['auc']; save_checkpoint(tp,{'model':teacher.state_dict(),'epoch':epoch})
                 print(f'fold={k} teacher epoch={epoch} val_auc={metrics["auc"]:.4f}',flush=True)
                 if scheduler is not None: scheduler.step()
+                save_checkpoint(last_path,{'model':teacher.state_dict(),'optimizer':opt.state_dict(),'scheduler':scheduler.state_dict() if scheduler is not None else None,'best':best,'epoch':epoch,'history':history,'cpu_rng':torch.get_rng_state(),'cuda_rng':torch.cuda.get_rng_state_all() if device.type=='cuda' else []})
             write_json(out/'teacher_history.json',history)
         teacher.load_state_dict(load_checkpoint(tp)['model']); teacher.eval()
         if 'targets' in stages:
@@ -141,10 +150,11 @@ def run(config, stages):
 def main():
     p=argparse.ArgumentParser(description='ShapNet binary WSI experiment runner')
     p.add_argument('--config',required=True)
+    p.add_argument('--resume',action='store_true',help='Resume teacher from full last-epoch checkpoint')
     p.add_argument('--stages',default='teacher,targets,student,evaluate')
     args=p.parse_args(); stages=args.stages.split(',')
     if not stages or any(s not in ['teacher','targets','student','evaluate'] for s in stages):
         p.error('Unknown stage')
-    run(args.config,stages)
+    run(args.config,stages,resume=args.resume)
 
 if __name__=='__main__': main()

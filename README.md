@@ -50,3 +50,7 @@ CPU synthetic tests cover numerical gradient equivalence, all six MIL forward/ba
 ## Aligned hyperparameter run
 
 `configs/lung_cancer_rrtmil_aligned.json` selects Fold 0 with RRTMIL region_num=16, Adam lr=2e-4 / weight_decay=1e-5 / cosine; student architecture and pairwise objective are unchanged. Student AdamW uses lr=1e-3 / weight_decay=1e-4 / cosine to 1e-5, noise augmentation, clip=5 and patience=10. Validation fraction is 0.1. The student remains context_mlp (128), with 4096 sampled global pairs, not the historical Transformer. Patient isolation and validation-only thresholds remain in force. A local full PT/H5 validation is required before this run.
+
+## Runtime integrity and teacher restart
+
+Optional manifest column `feature_sha256` pins every feature file to prevalidated bytes. Every read verifies and deserializes the same byte buffer; three bounded retries allow a transient bad read to recover, emitting a warning. Persistent corruption is never ignored or filled. Teacher `teacher_last.pt` now stores model, optimizer, scheduler, epoch, history and torch CPU/CUDA RNG state after every epoch. Use `--resume` with a teacher-stage run to continue from that checkpoint. Historical runs without this artifact cannot be resumed exactly. Student epoch resume is not implemented.
